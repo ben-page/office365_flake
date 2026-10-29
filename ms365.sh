@@ -284,7 +284,7 @@ default_save_dir() {
 
 # bump when apply_registry changes so existing prefixes pick the new tweaks up on the next run
 REGISTRY_REV=8
-SHIMS_REV=sppc,ole32,uia,d2d1,appinit,ink,webhttp,olkacct2  # bump when install_shims gains a DLL or an override
+SHIMS_REV=sppc,ole32,uia,d2d1,appinit,ink,webhttp2,olkacct2  # bump when install_shims gains a DLL or an override
 apply_registry() {
   mkdir -p "$ODT_DIR"
   local reg="$ODT_DIR/ms365.reg"
@@ -512,9 +512,9 @@ Windows Registry Editor Version 5.00
 @="C:\\windows\\system32\\ms365uia.dll"
 "ThreadingModel"="Both"
 
-; Windows.Web.Http (Wine has none): OneNote's React Native UI builds an HttpClient at start and its
-; JavaScript thread dies without one. The ole32 shim (ms365shim.dll) serves stand-ins whose requests
-; fail as "cannot connect".
+; Windows.Web.Http and Windows.Storage.Streams.DataReader (Wine has neither): Office's React Native
+; UI (OneNote's navigation pane, parts of Outlook) does its network requests through them.
+; The ole32 shim (ms365shim.dll) implements them on WinHTTP (ole32-shim/webhttp.c).
 [HKEY_LOCAL_MACHINE\Software\Microsoft\WindowsRuntime\ActivatableClassId\Windows.Web.Http.Filters.HttpBaseProtocolFilter]
 "DllPath"="C:\\windows\\system32\\ms365shim.dll"
 
@@ -525,6 +525,21 @@ Windows Registry Editor Version 5.00
 "DllPath"="C:\\windows\\system32\\ms365shim.dll"
 
 [HKEY_LOCAL_MACHINE\Software\Microsoft\WindowsRuntime\ActivatableClassId\Windows.Web.Http.HttpRequestMessage]
+"DllPath"="C:\\windows\\system32\\ms365shim.dll"
+
+[HKEY_LOCAL_MACHINE\Software\Microsoft\WindowsRuntime\ActivatableClassId\Windows.Web.Http.HttpResponseMessage]
+"DllPath"="C:\\windows\\system32\\ms365shim.dll"
+
+[HKEY_LOCAL_MACHINE\Software\Microsoft\WindowsRuntime\ActivatableClassId\Windows.Web.Http.HttpStringContent]
+"DllPath"="C:\\windows\\system32\\ms365shim.dll"
+
+[HKEY_LOCAL_MACHINE\Software\Microsoft\WindowsRuntime\ActivatableClassId\Windows.Web.Http.HttpBufferContent]
+"DllPath"="C:\\windows\\system32\\ms365shim.dll"
+
+[HKEY_LOCAL_MACHINE\Software\Microsoft\WindowsRuntime\ActivatableClassId\Windows.Web.Http.Headers.HttpMediaTypeHeaderValue]
+"DllPath"="C:\\windows\\system32\\ms365shim.dll"
+
+[HKEY_LOCAL_MACHINE\Software\Microsoft\WindowsRuntime\ActivatableClassId\Windows.Storage.Streams.DataReader]
 "DllPath"="C:\\windows\\system32\\ms365shim.dll"
 
 ; CLSID_InkDisp (Tablet PC ink, InkObj.dll on Windows; a stub DLL in Wine). OneNote creates one at
