@@ -199,7 +199,7 @@ default_save_dir() {
 
 # bump when apply_registry changes so existing prefixes pick the new tweaks up on the next run
 REGISTRY_REV=8
-SHIMS_REV=sppc,ole32,uia,d2d1,appinit,ink,webhttp   # bump when install_shims gains a DLL or an override
+SHIMS_REV=sppc,ole32,uia,d2d1,appinit,ink,webhttp,olkacct   # bump when install_shims gains a DLL or an override
 apply_registry() {
   mkdir -p "$ODT_DIR"
   local reg="$ODT_DIR/ms365.reg"
@@ -457,6 +457,24 @@ Windows Registry Editor Version 5.00
 
 [HKEY_LOCAL_MACHINE\Software\Classes\CLSID\{937C1A34-151D-4610-9CA6-A8CC9BDB5D83}\InprocServer32]
 @="C:\\windows\\system32\\ms365uia.dll"
+"ThreadingModel"="Both"
+
+; CLSID_OlkAccountManager (OLMAPI32.DLL). Outlook's first-run account setup creates it to add the
+; signed-in account to a new mail profile. Click-to-Run registers it only in its App-V virtual registry,
+; so Wine's COM reports REGDB_E_CLASSNOTREG and Outlook shows "An unknown error occurred, error code:
+; 0x80040154" and falls back to a profile with only a local Outlook Data File (.pst).
+[HKEY_CURRENT_USER\Software\Classes\CLSID\{ED475414-B0D6-11D2-8C3B-00104B2A6676}]
+@="Outlook Account Manager"
+
+[HKEY_CURRENT_USER\Software\Classes\CLSID\{ED475414-B0D6-11D2-8C3B-00104B2A6676}\InprocServer32]
+@="C:\\Program Files\\Microsoft Office\\root\\Office16\\OLMAPI32.DLL"
+"ThreadingModel"="Both"
+
+[HKEY_LOCAL_MACHINE\Software\Classes\CLSID\{ED475414-B0D6-11D2-8C3B-00104B2A6676}]
+@="Outlook Account Manager"
+
+[HKEY_LOCAL_MACHINE\Software\Classes\CLSID\{ED475414-B0D6-11D2-8C3B-00104B2A6676}\InprocServer32]
+@="C:\\Program Files\\Microsoft Office\\root\\Office16\\OLMAPI32.DLL"
 "ThreadingModel"="Both"
 
 REG
