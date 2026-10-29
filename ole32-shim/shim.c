@@ -413,15 +413,21 @@ static const struct lang_statics_vtbl lang_statics_vtbl = {
 };
 static lang_statics lang_statics_obj = { &lang_statics_vtbl };
 
+/* Also reached in the passive instance (see other_instance_active): combase calls the WinRT stand-ins'
+ * DllGetActivationFactory in ms365shim.dll, the DllPath registered for them, and when the ole32.dll
+ * instance loaded first (Outlook links ole32 directly) DllMain never set real_GetProcAddress here.
+ * Calling it jumped to address 0, so Outlook's React Native UI got no HttpClient. Fall back to the
+ * plain export lookup. */
 static void resolve_winrt(void)
 {
     if (real_RoGetActivationFactory) return;
     HMODULE cb = GetModuleHandleA("combase.dll");
     if (!cb) cb = LoadLibraryA("combase.dll");
     if (!cb) return;
-    p_WindowsGetStringRawBuffer = (pWindowsGetStringRawBuffer)real_GetProcAddress(cb, "WindowsGetStringRawBuffer");
-    p_WindowsCreateString = (pWindowsCreateString)real_GetProcAddress(cb, "WindowsCreateString");
-    real_RoGetActivationFactory = (pRoGetActivationFactory)real_GetProcAddress(cb, "RoGetActivationFactory");
+    FARPROC (WINAPI *gpa)(HMODULE, LPCSTR) = real_GetProcAddress ? real_GetProcAddress : GetProcAddress;
+    p_WindowsGetStringRawBuffer = (pWindowsGetStringRawBuffer)gpa(cb, "WindowsGetStringRawBuffer");
+    p_WindowsCreateString = (pWindowsCreateString)gpa(cb, "WindowsCreateString");
+    real_RoGetActivationFactory = (pRoGetActivationFactory)gpa(cb, "RoGetActivationFactory");
 }
 
 /* Windows.Data.Json.JsonObject statics (Parse/TryParse). Wine's windows.web has JsonValue statics
