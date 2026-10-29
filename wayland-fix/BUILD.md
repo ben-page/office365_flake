@@ -1,6 +1,6 @@
 # Rebuilding `winewayland.so`
 
-`winewayland.so` is GE-Proton11-7's Wayland driver with five changes:
+`winewayland.so` is GE-Proton11-7's Wayland driver with six changes:
 
 * `client-surface-zorder.patch`: stacks the subsurfaces of self-presenting child windows in Win32
   z-order (OneNote's lists, Excel's grid), and again whenever a child window's z-order changes
@@ -11,6 +11,9 @@
 * `maximized-frame.patch`: a maximized window extends past the compositor's area by its frame, as
   on Windows, and the surface geometry leaves the frame out (a dead strip along the top and left of
   maximized Office windows on KDE Plasma).
+* `maximized-resize.patch` (needs `maximized-frame.patch`): a window maximized before the
+  compositor's first configure is resized to the configured size before that configure is
+  acknowledged (Word's status bar was behind KDE Plasma's panel).
 * the cursor-shape edit in `build.sh`: `all_resize` sent as `move`.
 
 `build.sh` rebuilds it: it clones GE-Proton11-7 (Wine, wine-staging and libxkbcommon only), applies
@@ -78,6 +81,13 @@ GE's driver also moves a toplevel's Win32 position to the origin of its output w
 the window state (output enter and leave, focus changes). The patch moves a maximized window to that
 origin minus the frame instead; at the origin itself Office's region would lose its left and top
 inset and stop 5 px short of the right edge, which moves the dead strip there.
+
+A maximized configure is acknowledged straight from the compositor's request, without the Win32
+resize, when the window is at least that large. Office starts maximized before its first configure,
+which Win32 sizes for the whole output (Wine's work area under Wayland), so Word's status bar stayed
+below the geometry, behind the panel (also with GE's own driver). `maximized-resize.patch` makes that
+shortcut need exactly the configured size plus the frame for windows with the frame; otherwise
+`wayland_configure_window` resizes the window first.
 
 At 1.5x the 5 px frame is 3 1/3 logical pixels and the geometry offset is 3, so the frame can leave
 half a physical pixel at the edges; input reaches the window there.
