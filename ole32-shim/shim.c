@@ -122,6 +122,16 @@ static HRESULT WINAPI my_SLGetGenuineInformation(const void *id, LPCWSTR name, i
     return fn(id, name, type, size, data);
 }
 
+/* combase RoTransformError (api-ms-win-core-winrt-error-l1-1-0/1): Wine's combase exports it as a
+ * stub that aborts the process. The WinRT runtime libraries (vccorlib, C++/WinRT, WinAppSDK)
+ * call it on their error paths, e.g. when the stand-ins below refuse a Windows.Web.Http request
+ * from Outlook's React Native UI, and Outlook died with "unimplemented function
+ * combase.dll.RoTransformError". react-native-win32 looks it up with GetProcAddress and gets Wine's
+ * stub export, so it is overwritten in place (STUBPATCHES). It only reports error context to a
+ * debugger; FALSE = not reported. */
+static BOOL WINAPI my_RoTransformError(HRESULT old_error, HRESULT new_error, void *message)
+{ (void)old_error; (void)new_error; (void)message; return FALSE; }
+
 /* misc: report "not supported" the way the real API does when the feature is absent */
 static HRESULT WINAPI my_DeleteAppContainerProfile(LPCWSTR name) { (void)name; return S_OK; }
 static DWORD WINAPI my_DavFlushFile(HANDLE h) { (void)h; return ERROR_NOT_SUPPORTED; }
@@ -225,6 +235,7 @@ static FARPROC WINAPI my_GetProcAddress(HMODULE h, LPCSTR name)
 static const struct patch STUBPATCHES[] = {
     { "oleacc.dll", "CreateStdAccessibleProxyW", (void *)my_CreateStdAccessibleProxyW },
     { "oleacc.dll", "CreateStdAccessibleProxyA", (void *)my_CreateStdAccessibleProxyA },
+    { "combase.dll", "RoTransformError",         (void *)my_RoTransformError },
 };
 #define NSTUBPATCHES (sizeof(STUBPATCHES) / sizeof(STUBPATCHES[0]))
 
