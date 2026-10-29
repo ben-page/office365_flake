@@ -239,6 +239,13 @@ on Wine's `JsonValue`).
   (`MS365_WAYLAND=0`). Office activates its popup, hides and re-shows it while positioning it, and
   sway's Xwayland layer moves keyboard focus back to the main window in between; Wine then sends
   Office the message that cancels the menu. The Wayland driver, the default, keeps focus inside Wine.
+* **KDE Plasma (KWin 6.8) on the Wayland driver: dragging the title bar of a maximized window does
+  nothing.** Office never asks to move a maximized window (no `SC_MOVE` reaches Wine), so KWin
+  cannot restore it on drag as it does with its own title bars; use the restore button first. The
+  title-bar buttons, and dragging a restored window, work. Checked with one output; with three
+  outputs at 1.5x, clicks on the title bar were seen going to the window behind before the
+  maximized-frame fix, and that has not been rechecked. `MS365_WAYLAND=0` (KWin decorates the
+  window) is the fallback.
 * **Wayland driver and HiDPI.** The driver reports the monitor at 96 dpi, so the launcher sets Wine's
   dpi from the sway output scale. At exactly 192 dpi Word overflows its main thread's stack while
   building its first window (an Office recursion; same on GE-Proton 11-6 and 11-7), so the automatic
