@@ -164,7 +164,9 @@ apply_tricks() {
 
 # Wine's Wayland driver exposes outputs at their physical size, so on a HiDPI panel Office renders
 # tiny at 96 dpi. MS365_DPI sets Wine's dpi; unset, it follows the focused sway output's scale on
-# the Wayland driver (96 * scale) and stays 96 on Xwayland, which scales by itself. Capped at 180:
+# the Wayland driver (96 * scale). On X11/Xwayland it follows Xft.dpi: compositors that scale X11
+# clients themselves (sway, KWin's "scaled by the system") leave it at 96, while KWin's "apply
+# scaling themselves" sets it to 96 * scale and leaves Office tiny at 96 dpi. Capped at 180:
 # at exactly 192 dpi Word overflows its main thread's stack while building its first window (an
 # Office recursion, same on GE-Proton 11-6 and 11-7); 180 renders and behaves fine.
 wine_dpi() {
@@ -175,6 +177,11 @@ import json, sys
 outs = json.load(sys.stdin)
 o = next((o for o in outs if o.get("focused")), outs[0] if outs else {})
 print(min(180, int(round(96 * float(o.get("scale", 1))))))' 2>/dev/null && return
+  fi
+  if { [ "${MS365_WAYLAND:-1}" != 1 ] || [ -z "${WAYLAND_DISPLAY:-}" ]; } && [ -n "${DISPLAY:-}" ] && command -v xrdb >/dev/null 2>&1; then
+    local xft
+    xft="$(xrdb -query 2>/dev/null | sed -n 's/^Xft\.dpi:[[:space:]]*\([0-9.]*\).*/\1/p' | head -n 1)"
+    if [ -n "$xft" ]; then python3 -c 'import sys; print(min(180, max(96, int(round(float(sys.argv[1]))))))' "$xft" && return; fi
   fi
   echo 96
 }
