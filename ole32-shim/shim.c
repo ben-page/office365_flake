@@ -1824,6 +1824,70 @@ static HRESULT WINAPI my_CoCreateInstanceEx(REFCLSID clsid, IUnknown *outer, DWO
     return hr;
 }
 
+/* ---- combase: IContextCallback::ContextCallback --------------------------------------------
+ * react-native-win32 waits for WinRT async operations with its own awaiter (lessthrow_await_adapter
+ * in react-native-windows): it captures CoGetObjectContext before suspending and resumes the
+ * coroutine from the Completed handler through IContextCallback::ContextCallback. Wine 11's
+ * ContextCallback is a stub that answers E_NOTIMPL, so every operation that had not completed
+ * successfully by the time it was awaited threw instead of resuming, and React Native reported
+ * "Not implemented." The context handed to react-native-win32 (it imports CoGetObjectContext
+ * through api-ms-win-core-com-l1-1-0) is wrapped and remembers the apartment it was captured in. A
+ * callback into the multithreaded apartment from a thread outside any STA, or into the calling
+ * thread's own apartment, needs no marshalling and is made directly, as COM does; anything else
+ * still goes to Wine. (Wine fix: dlls/combase/combase.c, thread_context_callback_ContextCallback.) */
+static const GUID IID_ContextCallback = {0x000001da,0x0000,0x0000,{0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x46}};
+typedef HRESULT (WINAPI *pContextCall)(void *data);
+typedef struct ctxcb ctxcb;
+typedef struct ctxcb_vtbl {
+    HRESULT (WINAPI *QueryInterface)(ctxcb *, REFIID, void **);
+    ULONG   (WINAPI *AddRef)(ctxcb *);
+    ULONG   (WINAPI *Release)(ctxcb *);
+    HRESULT (WINAPI *ContextCallback)(ctxcb *, pContextCall, void *, REFIID, int, IUnknown *);
+} ctxcb_vtbl;
+struct ctxcb { const ctxcb_vtbl *vtbl; LONG ref; ctxcb *inner; BOOL sta; DWORD tid; };  /* inner: Wine's context */
+typedef HRESULT (WINAPI *pCoGetObjectContext)(REFIID, void **);
+static pCoGetObjectContext real_CoGetObjectContext;
+static LONG g_ctx_logs;
+
+static BOOL thread_in_sta(void)
+{
+    APTTYPE type; APTTYPEQUALIFIER qualifier;
+    if (!p_CoGetApartmentType || FAILED(p_CoGetApartmentType(&type, &qualifier))) return FALSE;
+    return type == APTTYPE_STA || type == APTTYPE_MAINSTA;
+}
+static HRESULT WINAPI ctxcb_QueryInterface(ctxcb *s, REFIID iid, void **out)
+{
+    if (!out) return E_POINTER;
+    if (IsEqualGUID(iid, &IID_Unk) || IsEqualGUID(iid, &IID_ContextCallback)) { *out = s; InterlockedIncrement(&s->ref); return S_OK; }
+    return s->inner->vtbl->QueryInterface(s->inner, iid, out);
+}
+static ULONG WINAPI ctxcb_AddRef(ctxcb *s) { return (ULONG)InterlockedIncrement(&s->ref); }
+static ULONG WINAPI ctxcb_Release(ctxcb *s)
+{
+    ULONG r = (ULONG)InterlockedDecrement(&s->ref);
+    if (!r) { s->inner->vtbl->Release(s->inner); HeapFree(GetProcessHeap(), 0, s); }
+    return r;
+}
+static HRESULT WINAPI ctxcb_ContextCallback(ctxcb *s, pContextCall fn, void *data, REFIID iid, int method, IUnknown *unk)
+{
+    if (!fn) return E_INVALIDARG;
+    if (s->tid == GetCurrentThreadId() || (!s->sta && !thread_in_sta())) return fn(data);
+    if (InterlockedIncrement(&g_ctx_logs) <= 10) OutputDebugStringA("ms365 ole32 shim: ContextCallback into another thread's STA left to Wine");
+    return s->inner->vtbl->ContextCallback(s->inner, fn, data, iid, method, unk);
+}
+static const ctxcb_vtbl ctxcb_vtable = { ctxcb_QueryInterface, ctxcb_AddRef, ctxcb_Release, ctxcb_ContextCallback };
+static HRESULT WINAPI my_CoGetObjectContext(REFIID iid, void **out)
+{
+    if (!real_CoGetObjectContext) return CO_E_NOTINITIALIZED;
+    HRESULT hr = real_CoGetObjectContext(iid, out);
+    if (FAILED(hr) || !out || !*out || !iid || !IsEqualGUID(iid, &IID_ContextCallback)) return hr;
+    ctxcb *s = (ctxcb *)HeapAlloc(GetProcessHeap(), 0, sizeof(*s));
+    if (!s) return hr;   /* keep Wine's */
+    s->vtbl = &ctxcb_vtable; s->ref = 1; s->inner = (ctxcb *)*out; s->sta = thread_in_sta(); s->tid = GetCurrentThreadId();
+    *out = s;
+    return hr;
+}
+
 static const struct patch PATCHES[] = {
     { "ole32.dll",    "CoCreateInstance",            (void *)my_CoCreateInstance },
     { "ole32.dll",    "CoCreateInstanceEx",          (void *)my_CoCreateInstanceEx },
@@ -1842,6 +1906,7 @@ static const struct patch PATCHES[] = {
     { "msi.dll",      "MsiGetComponentPathW",        (void *)my_MsiGetComponentPathW },
     { "user32.dll",   "CreateWindowExW",             (void *)my_CreateWindowExW },
     { "api-ms-win-core-winrt-l1-1-0.dll", "RoGetActivationFactory", (void *)my_RoGetActivationFactory },
+    { "api-ms-win-core-com-l1-1-0.dll", "CoGetObjectContext", (void *)my_CoGetObjectContext },
     { "kernel32.dll", "SetFileShortNameW",           (void *)my_SetFileShortNameW },
     { "kernel32.dll", "SetFileShortNameA",           (void *)my_SetFileShortNameA },
     { "kernel32.dll", "FindPackagesByPackageFamily", (void *)my_FindPackagesByPackageFamily },
@@ -1945,6 +2010,8 @@ static void note_module(HMODULE h, const char *modname)
         } else if (lstrcmpiA(WRAPMODS[m].dll, "combase.dll") == 0) {
             real_CoCreateInstance = (pCoCreateInstance)real_GetProcAddress(h, "CoCreateInstance");
             real_CoCreateInstanceEx = (pCoCreateInstanceEx)real_GetProcAddress(h, "CoCreateInstanceEx");
+            real_CoGetObjectContext = (pCoGetObjectContext)real_GetProcAddress(h, "CoGetObjectContext");
+            p_CoGetApartmentType = (pCoGetApartmentType)real_GetProcAddress(h, "CoGetApartmentType");
         } else if (lstrcmpiA(WRAPMODS[m].dll, "user32.dll") == 0) {
             real_CreateWindowExW = (pCreateWindowExW)real_GetProcAddress(h, "CreateWindowExW");
         } else if (lstrcmpiA(WRAPMODS[m].dll, "d2d1.dll") == 0) {
